@@ -12,10 +12,11 @@
   <p id="meta" class="meta"></p>
 </header>
 
+<section class="strip" id="strip" aria-label="Summary of the rows shown"></section>
+
 <section class="legend" aria-label="How implied value is computed">
-  <code class="formula">implied value = TVL × <b class="c-cat">category</b> × <b class="c-gro">growth</b> × <b class="c-age">age</b> × <b class="c-thin">thin</b></code>
-  <ul id="legend-terms" class="terms"></ul>
-  <p class="keys"><span class="key"><i class="kbar"><i></i></i> bar = implied value / TVL</span><span class="key"><span class="warn">⚠</span> thin-TVL discount</span><span class="key"><span class="chip">±8%</span> confidence band (±15% under $5M TVL)</span><span class="key"><span class="wdot"></span> watchlist</span></p>
+  <code class="formula">implied value = TVL × <b class="c-cat" title="What the market pays for the business">category</b> × <b class="c-gro" title="7-day change, compounded to 90 days and damped">growth</b> × <b class="c-age" title="Time listed with no token">age</b> × <b class="c-thin" title="Discount when TVL is under $5M">thin</b></code>
+  <p class="keys"><span class="key"><i class="kbar"><i></i></i> bar = implied value / TVL</span><span class="key"><span class="warn">⚠</span> thin-TVL discount</span><span class="key"><span class="chip">±8%</span> confidence band (±15% under $5M TVL)</span><span class="key"><span class="wdot"></span> watchlist</span><span class="key"><i class="rmini"><i></i></i> launch readiness 0–100</span></p>
 </section>
 
 <form class="filters" role="search" onsubmit="return false">

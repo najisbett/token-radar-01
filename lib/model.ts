@@ -11,6 +11,7 @@
 //             the 7-day rate compounded into a 90-day outlook, then damped by a fifth-root
 //   age       0.7 + 0.5 x min(days listed, 1095) / 1095: a protocol that has run longer with no token scores
 //             higher (0.7 on day one, 1.2 from three years); unknown listing date counts as one year
+//   readiness 0-100 (not a factor): 40 age + 30 growth persistence + 30 TVL durability, see readiness()
 //   thin      0.85 when TVL < $5M, else 1
 //
 // The result is rounded, clamped to at least 1, and the board is sorted descending. The confidence band is
@@ -37,7 +38,7 @@ export interface Snapshot {
   watchlist: string[];
 }
 
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'radar-3';
 export const EARLY_ROWS = 160;
 
 export const PARAMS = {
@@ -80,6 +81,27 @@ export function categoryMultiplier(category: string | null): number {
   return category !== null && Object.hasOwn(CATEGORY_MULTIPLIER, category) ? CATEGORY_MULTIPLIER[category]! : CATEGORY_DEFAULT;
 }
 
+export interface Step {
+  action: string;
+  capital_usd: number;
+  gas_usd: number;
+  minutes: number;
+  risk?: Risk;
+}
+
+export type Risk = 'Low' | 'Med' | 'High';
+
+/** Launch readiness, 0-100: how settled the protocol looks while it still has no token. */
+export interface Readiness {
+  score: number;
+  /** Points out of 40: time listed with no token (saturates at three years; unknown date counts a third). */
+  age_pts: number;
+  /** Points out of 30: does the 7-day move look like steady growth (mild rise) rather than a spike or a bleed. */
+  persistence_pts: number;
+  /** Points out of 30: TVL durability, log-scaled from $100K (0) to $1B (30). */
+  durability_pts: number;
+}
+
 export interface Factors {
   category: number;
   growth: number;
@@ -116,6 +138,11 @@ export interface BoardRow {
     age_days: number | null;
     age_known: boolean;
   };
+  readiness: Readiness;
+  /** implied value / TVL */
+  multiple: number;
+  why: string;
+  risk_note: string;
   farm_steps: string[];
   farm_total_cost_usd: number;
   farm_total_minutes: number;
@@ -143,6 +170,12 @@ export interface RadarRow {
   watch: boolean;
   f: Factors;
   outlook_90d_pct: number;
+  readiness: Readiness;
+  multiple: number;
+  driver: keyof Factors;
+  drag: keyof Factors;
+  why: string;
+  risk_note: string;
   steps: Step[];
 }
 
@@ -156,6 +189,8 @@ export interface RadarData {
   category_multiplier: Record<string, number>;
   category_default: number;
   watchlist_size: number;
+  median_multiple: number;
+  growing_share_pct: number;
   board_size: number;
   early_size: number;
   live_size: number;
@@ -193,6 +228,70 @@ export function kindOf(category: string | null): Kind {
   return 'yield';
 }
 
+/** Launch readiness from three snapshot figures: age since listed_at, 7d growth persistence, TVL durability. */
+export function readiness(p: SnapshotProtocol, age: number | null): Readiness {
+  const ageShare = age === null ? 1 / 3 : Math.min(age, PARAMS.age_saturation_days) / PARAMS.age_saturation_days;
+  const g = finite(p.change_7d) ? p.change_7d / 100 : null;
+  // A mild rise is the most persistent; a spike above +50% or a fall of 20% or more is not.
+  let persistence = 0.4;
+  if (g !== null) {
+    if (g >= 0 && g <= 0.5) persistence = 0.65 + 0.35 * (1 - Math.abs(g - 0.05) / 0.45);
+    else if (g > 0.5) persistence = Math.max(0.2, 0.65 - (g - 0.5) * 0.5);
+    else persistence = Math.max(0, 0.6 + g * 3);
+  }
+  const tvl = finite(p.tvl_usd) && p.tvl_usd > 0 ? p.tvl_usd : 0;
+  const durability = tvl <= 0 ? 0 : clamp(Math.log10(tvl / 1e5) / 4, 0, 1);
+  const age_pts = Math.round(40 * ageShare);
+  const persistence_pts = Math.round(30 * clamp(persistence, 0, 1));
+  const durability_pts = Math.round(30 * durability);
+  return { score: age_pts + persistence_pts + durability_pts, age_pts, persistence_pts, durability_pts };
+}
+
+const FACTOR_NAME: Record<keyof Factors, string> = { category: 'category', growth: '7d growth', age: 'time with no token', thin: 'thin TVL' };
+
+/** One line: the factor that lifts the value most, and the one that holds it back most. */
+export function whyLine(f: Factors, p: SnapshotProtocol, age: number | null): { driver: keyof Factors; drag: keyof Factors; why: string } {
+  const keys = ['category', 'growth', 'age', 'thin'] as (keyof Factors)[];
+  const sorted = [...keys].sort((a, b) => Math.log(f[b]) - Math.log(f[a]));
+  const driver = sorted[0]!;
+  const drag = sorted[sorted.length - 1]!;
+  const detail = (k: keyof Factors): string => {
+    if (k === 'category') return p.category ?? 'no category';
+    if (k === 'growth') return finite(p.change_7d) ? `${p.change_7d > 0 ? '+' : ''}${p.change_7d.toFixed(1)}% in 7d` : 'no 7d figure';
+    if (k === 'age') return age === null ? 'listing date unknown' : age >= 365 ? `${(age / 365).toFixed(1)} y listed` : `${age} d listed`;
+    return f.thin < 1 ? 'TVL under $5M' : 'TVL above $5M';
+  };
+  const x = (k: keyof Factors): string => `${FACTOR_NAME[k]} ×${f[k].toFixed(2)} (${detail(k)})`;
+  const tail = f[drag] < 1 ? `held back by ${x(drag)}` : `no drag, weakest is ${x(drag)}`;
+  return { driver, drag, why: `Lifted by ${x(driver)}; ${tail}.` };
+}
+
+const RISK_NOTE: Record<Kind, string> = {
+  lending: 'Liquidation if collateral falls; keep the loan small and check health twice a week.',
+  dex: 'Impermanent loss and thin pools; keep price impact low and exit on schedule.',
+  perp: 'Leverage can liquidate fast and funding costs add up; stay at 2x or less.',
+  bridge: 'Bridge contracts are a classic loss point; send a test transfer first and keep amounts small.',
+  restaking: 'Slashing and long unbonding queues lock capital; split operators and plan the exit early.',
+  yield: 'Vault strategies can lose principal and some lock deposits; read the fee and lock-up terms.',
+  chain: 'Gas and bridge costs eat small balances; activity guides can be scams, so use official channels only.',
+};
+
+export function riskNote(kind: Kind, r: Readiness, p: SnapshotProtocol): string {
+  const extra: string[] = [];
+  if (p.tvl_usd < PARAMS.thin_tvl_usd) extra.push('TVL is thin, so one large exit moves the pool.');
+  if (r.score < 40) extra.push('Readiness is low: young or volatile.');
+  extra.push('No token is announced: a points programme may never come.');
+  return `${RISK_NOTE[kind]} ${extra.slice(0, 2).join(' ')}`;
+}
+
+const HIGH_RISK = /borrow|short|long |leverag|riskier|slash|unbond|lock |stop on|impermanent/i;
+export function stepRisk(s: Step): Risk {
+  if (s.capital_usd === 0 && s.gas_usd === 0) return 'Low';
+  if (HIGH_RISK.test(s.action) && (s.capital_usd > 0 || s.gas_usd > 0)) return 'High';
+  if (s.capital_usd > 0 || /deploy|repay|withdraw|remove|rebalance|vote/i.test(s.action)) return 'Med';
+  return 'Low';
+}
+
 /** The four factors and the implied value of one protocol. Always a positive integer. */
 export function score(p: SnapshotProtocol, asOf: string) {
   const age = ageDays(asOf, p.listed_at);
@@ -225,6 +324,8 @@ export function score(p: SnapshotProtocol, asOf: string) {
     low: Math.max(1, Math.round(implied * (1 - w))),
     high: Math.max(1, Math.round(implied * (1 + w))),
     confidence: Math.round((1 - w) * 100),
+    readiness: readiness(p, age),
+    multiple: tvl > 0 ? implied / tvl : 0,
   };
 }
 
@@ -453,6 +554,9 @@ export function buildBoard(snapshot: Snapshot): BoardRow[] {
         age_days: s.age,
         age_known: s.age !== null,
       },
+      readiness: s.readiness,
+      multiple: Math.round(s.multiple * 1e3) / 1e3,
+      ...(() => { const w = whyLine(s.factors, p, s.age); return { why: w.why, risk_note: riskNote(kindOf(p.category), s.readiness, p) }; })(),
       farm_steps: steps.map(stepText),
       farm_total_cost_usd: Math.round(steps.reduce((a, x) => a + x.capital_usd + x.gas_usd, 0)),
       farm_total_minutes: steps.reduce((a, x) => a + x.minutes, 0),
@@ -496,8 +600,21 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
       thin: r.model.thin_tvl_multiplier,
     },
     outlook_90d_pct: r.model.outlook_90d_pct,
-    steps: farmPlan(index.get(r.slug)!, r.age_days),
+    readiness: r.readiness,
+    multiple: r.multiple,
+    ...(() => {
+      const p = index.get(r.slug)!;
+      const w = whyLine({ category: r.model.category_multiplier, growth: r.model.growth_multiplier, age: r.model.age_multiplier, thin: r.model.thin_tvl_multiplier }, p, r.age_days);
+      return { driver: w.driver, drag: w.drag };
+    })(),
+    why: r.why,
+    risk_note: r.risk_note,
+    steps: farmPlan(index.get(r.slug)!, r.age_days).map((st) => ({ ...st, risk: stepRisk(st) })),
   }));
+  const sortedM = rows.map((x) => x.multiple).sort((a, b) => a - b);
+  const mid = sortedM.length >> 1;
+  const median = sortedM.length === 0 ? 0 : sortedM.length % 2 ? sortedM[mid]! : (sortedM[mid - 1]! + sortedM[mid]!) / 2;
+  const growing = rows.filter((x) => x.change_7d !== null && x.change_7d > 0).length;
   const radar: RadarData = {
     as_of: snapshot.as_of,
     source: snapshot.source.replace(/https?:\/\/[^\s,]+/g, 'the protocols endpoint'),
@@ -511,6 +628,8 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     ),
     category_default: CATEGORY_DEFAULT,
     watchlist_size: snapshot.watchlist.length,
+    median_multiple: Math.round(median * 1e3) / 1e3,
+    growing_share_pct: rows.length ? Math.round((growing / rows.length) * 1000) / 10 : 0,
     board_size: board.length,
     early_size: board.filter((r) => !watch.has(r.slug)).length,
     live_size: snapshot.protocols.filter((p) => !isPreToken(p) && p.category !== 'CEX').length,
