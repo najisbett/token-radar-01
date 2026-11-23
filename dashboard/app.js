@@ -40,13 +40,21 @@
     { key: 'category', label: 'Category', val: (r) => (r.category || '').toLowerCase() },
     { key: 'chain', label: 'Chain', val: (r) => (r.chains[0] || '').toLowerCase() },
     { key: 'tvl', label: 'TVL', num: true, val: (r) => r.tvl_usd },
-    { key: 'change', label: '7d', num: true, val: (r) => r.change_7d },
-    { key: 'age', label: 'No token', num: true, tip: 'Time listed with no token', val: (r) => (r.age_known ? r.age_days : null) },
+    { key: 'change', label: '7d %', num: true, tip: '7-day TVL change', val: (r) => r.change_7d },
+    { key: 'age', label: 'Age (no token)', num: true, tip: 'Time listed with no token', val: (r) => (r.age_known ? r.age_days : null) },
     { key: 'ready', label: 'Readiness', num: true, tip: 'Launch readiness, 0–100', val: (r) => r.readiness.score },
-    { key: 'multiple', label: 'Multiple', num: true, tip: 'Implied value as a multiple of TVL', val: (r) => r.multiple },
     { key: 'value', label: 'Implied value', num: true, val: (r) => r.implied_value_usd },
   ];
 
+  const FCOL = { category: '--cat', growth: '--gro', age: '--age', thin: '--thin' };
+  const FNAME = { category: 'category', growth: 'growth', age: 'age', thin: 'thin TVL' };
+  const FSHORT = { category: 'cat', growth: 'growth', age: 'age', thin: 'thin' };
+  const DEFAULT_BAND = 8;
+  // direction glyph on a multiplier: + lifts the value, − drags it
+  const dir = (v) => (v > 1 ? '+' : v < 1 ? '−' : '·');
+  const signalOf = (r) => (r.readiness.score >= 70 && r.multiple >= 1.1 ? 'DIG' : r.readiness.score >= 50 ? 'WATCH' : 'PASS');
+  const band = (score) => (score < 40 ? 'lo' : score <= 70 ? 'mid' : 'hi');
+  const SIG_TIP = { DIG: 'DIG: readiness 70+ and multiple 1.1× or more', WATCH: 'WATCH: readiness 50 or more', PASS: 'PASS: readiness under 50 or no edge' };
   const state = { sort: 'rank', dir: 'asc', q: '', category: '', chain: '', watch: false, row: '' };
   const rowsBySlug = new Map(D.rows.map((r) => [r.slug, r]));
 
@@ -149,14 +157,14 @@
   function renderStrip(list) {
     const growing = list.filter((r) => r.change_7d !== null && r.change_7d > 0).length;
     const items = [
+      ['Median multiple', list.length ? mult(median(list.map((r) => r.multiple))) : '–', 'implied value / TVL', true],
       ['Protocols scored', String(list.length), list.length === D.rows.length ? 'every row on the board' : 'of ' + D.rows.length + ' on the board'],
       ['Watchlist', String(list.filter((r) => r.watch).length), 'of ' + D.watchlist_size + ' watched'],
-      ['Median multiple', list.length ? mult(median(list.map((r) => r.multiple))) : '–', 'implied value / TVL'],
       ['Growing', list.length ? Math.round((growing / list.length) * 100) + '%' : '–', 'share with TVL up over 7d'],
     ];
     $('strip').replaceChildren(
-      ...items.map(([k, v, c]) => {
-        const d = el('div', 'stat');
+      ...items.map(([k, v, c, hero]) => {
+        const d = el('div', 'stat' + (hero ? ' hero' : ''));
         d.append(el('span', 'sk', k), el('b', 'sv', v), el('span', 'sc', c));
         return d;
       })
@@ -174,7 +182,12 @@
       g.setAttribute('aria-label', 'thin TVL discount');
       top.append(g);
     }
-    top.append(el('span', 'chip', '±' + r.band_pct + '%'), el('span', 'vnum', usd(r.implied_value_usd)));
+    if (r.band_pct !== DEFAULT_BAND) {
+      const c = el('span', 'chip conf', '±' + r.band_pct + '%');
+      c.title = 'Wider confidence band: TVL under ' + usd(P.thin_tvl_usd) + ' (default is ±' + DEFAULT_BAND + '%)';
+      top.append(c);
+    }
+    top.append(el('span', 'vnum', usd(r.implied_value_usd)));
     const bar = el('div', 'ratio');
     bar.title = 'implied value / TVL = ' + r.multiple.toFixed(2) + '×';
     const f = el('i');
@@ -189,7 +202,7 @@
     const td = el('td', 'num ready');
     const s = r.readiness.score;
     const row = el('div', 'rrow');
-    const bar = el('div', 'rbar');
+    const bar = el('div', 'rbar ' + band(s));
     const f = el('i');
     f.style.width = s + '%';
     bar.append(f);
@@ -199,24 +212,36 @@
     return td;
   }
 
-  function renderRows(list) {
+  function renderRows(list, shown) {
     const q = state.q.trim().toLowerCase();
     const tb = $('rows');
     const frag = document.createDocumentFragment();
     list.forEach((r) => {
-      const tr = el('tr', r.slug === state.row ? 'sel' : '');
+      const tr = el('tr', (r.slug === shown ? 'sel' : '') + (r.readiness.score < 40 ? ' dim' : ''));
       tr.tabIndex = 0;
       tr.dataset.slug = r.slug;
 
       const name = el('td', 'name');
       name.title = r.name + ' — ' + r.why;
       const nm = el('div', 'nm');
-      if (r.watch) { const w = el('span', 'w'); w.title = 'On the watchlist'; w.setAttribute('role', 'img'); w.setAttribute('aria-label', 'On the watchlist'); nm.append(w); }
-      nm.append(hl(r.name, q));
-      const FN = { category: 'category', growth: 'growth', age: 'age', thin: 'thin TVL' };
+      const nmText = el('span', 'nmt');
+      if (r.watch) { const w = el('span', 'w'); w.title = 'On the watchlist'; w.setAttribute('role', 'img'); w.setAttribute('aria-label', 'On the watchlist'); nmText.append(w); }
+      nmText.append(hl(r.name, q));
+      const sig = signalOf(r);
+      const sg = el('span', 'sig sig-' + sig.toLowerCase(), sig);
+      sg.title = SIG_TIP[sig];
+      nm.append(nmText, sg);
       const sw = el('div', 'why');
-      sw.append(el('span', 'u', '▲'), ' ' + FN[r.driver] + ' ×' + r.f[r.driver].toFixed(2) + '  ');
-      sw.append(el('span', 'd', '▼'), r.f[r.drag] < 1 ? ' ' + FN[r.drag] + ' ×' + r.f[r.drag].toFixed(2) : ' no drag');
+      const fchip = (k, up) => {
+        const v = r.f[k];
+        const c = el('span', 'fc', dir(v) + ' ' + FSHORT[k] + ' ×' + v.toFixed(2));
+        c.style.setProperty('--k', 'var(' + FCOL[k] + ')');
+        c.title = (up ? 'Biggest lift: ' : 'Biggest drag: ') + FNAME[k] + ' ×' + v.toFixed(2);
+        return c;
+      };
+      sw.append(fchip(r.driver, true));
+      if (r.f[r.drag] < 1) sw.append(fchip(r.drag, false));
+      else sw.append(el('span', 'fc none', 'no drag'));
       name.append(nm, sw);
 
       const catTd = el('td', 'muted');
@@ -233,12 +258,10 @@
       ageTd.title = r.age_known ? 'Listed ' + r.listed_at + ', no token since (' + r.age_days + ' days)' : 'Listing date unknown';
       const tvlTd = el('td', 'num', usd(r.tvl_usd));
       tvlTd.title = '$' + Math.round(r.tvl_usd).toLocaleString('en-US');
-      const mTd = el('td', 'num mult', mult(r.multiple));
-      mTd.title = 'Implied value ' + usd(r.implied_value_usd) + ' / TVL ' + usd(r.tvl_usd);
       const rk = el('td', 'num muted', String(r.rank));
       rk.title = 'Rank ' + r.rank + ' by implied value';
 
-      tr.append(rk, name, catTd, chTd, tvlTd, chg, ageTd, readyCell(r), mTd, valCell(r));
+      tr.append(rk, name, catTd, chTd, tvlTd, chg, ageTd, readyCell(r), valCell(r));
       tr.addEventListener('click', () => open(r.slug));
       tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(r.slug); } });
       frag.append(tr);
@@ -247,10 +270,10 @@
   }
 
   function open(slug) {
-    state.row = state.row === slug ? '' : slug;
+    state.row = slug;
     writeUrl();
-    document.querySelectorAll('#rows tr').forEach((tr) => tr.classList.toggle('sel', tr.dataset.slug === state.row));
-    renderDetail();
+    document.querySelectorAll('#rows tr').forEach((tr) => tr.classList.toggle('sel', tr.dataset.slug === slug));
+    renderDetail(rowsBySlug.get(slug));
   }
 
   // ---- detail
@@ -277,9 +300,8 @@
     High: 'High: leverage, a lock, a loan or an extra-risky venue',
   };
 
-  function renderDetail() {
+  function renderDetail(r) {
     const box = $('detail');
-    const r = rowsBySlug.get(state.row);
     box.className = 'detail' + (r ? '' : ' hint');
     if (!r) {
       const kids = [el('h2', '', 'Select a protocol')];
@@ -329,11 +351,13 @@
     const tr = el('div', 'trace');
     tr.append(
       term('--tvl', 'TVL', usd(r.tvl_usd), 'snapshot'), op('×'),
-      term('--cat', 'category', r.f.category.toFixed(2), r.category || 'none'), op('×'),
-      term('--gro', 'growth', r.f.growth.toFixed(2), pct(r.change_7d) + ' 7d'), op('×'),
-      term('--age', 'age', r.f.age.toFixed(2), r.age_known ? ageText(r) : 'unknown'), op('×'),
-      term('--thin', 'thin', r.f.thin.toFixed(2), r.f.thin < 1 ? '< ' + usd(P.thin_tvl_usd) : '≥ ' + usd(P.thin_tvl_usd)), op('='),
-      term('--accent', 'implied', usd(r.implied_value_usd), mult(r.multiple) + ' TVL')
+      term('--cat', 'category', dir(r.f.category) + ' ' + r.f.category.toFixed(2), r.category || 'none'), op('×'),
+      term('--gro', 'growth', dir(r.f.growth) + ' ' + r.f.growth.toFixed(2), pct(r.change_7d) + ' 7d'), op('×'),
+      term('--age', 'age', dir(r.f.age) + ' ' + r.f.age.toFixed(2), r.age_known ? ageText(r) : 'unknown'), op('×'),
+      term('--thin', 'thin', dir(r.f.thin) + ' ' + r.f.thin.toFixed(2), r.f.thin < 1 ? '< ' + usd(P.thin_tvl_usd) : '≥ ' + usd(P.thin_tvl_usd)), op('='),
+      term('--accent', 'implied', usd(r.implied_value_usd), 'value'), op('÷'),
+      term('--tvl', 'TVL', usd(r.tvl_usd), 'snapshot'), op('='),
+      term('--accent', 'multiple', mult(r.multiple), 'implied / TVL')
     );
     kids.push(tr);
 
@@ -418,12 +442,14 @@
       th.setAttribute('aria-sort', th.dataset.key === state.sort ? (state.dir === 'asc' ? 'ascending' : 'descending') : 'none');
     });
     const list = visible();
-    renderRows(list);
+    // With no row picked, the panel shows the top visible row.
+    const shown = rowsBySlug.get(state.row) || list[0];
+    renderRows(list, shown ? shown.slug : '');
     renderStrip(list);
     $('count').textContent = 'Showing ' + list.length + ' of ' + D.rows.length;
     $('empty').hidden = list.length > 0;
     writeUrl();
-    renderDetail();
+    renderDetail(shown);
   }
 
   $('q').addEventListener('input', (e) => { state.q = e.target.value; render(); });
