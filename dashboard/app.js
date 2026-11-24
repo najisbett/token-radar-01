@@ -31,9 +31,11 @@
   const dl = (n) => '$' + Math.round(n).toLocaleString('en-US');
   const Q90 = I.q90_net_per_hr, Q50 = I.q50_net_per_hr;
   const GASCAP = '$' + P.farm_max_gas_usd, PMIN = Math.round(P.farm_min_p * 100) + '%';
-  const FARM_RULE = 'top decile by net $/hr within this board (q90 = ' + dl(Q90) + '/hr or more), gas ≤ ' + GASCAP + ', p ≥ ' + PMIN;
-  const WATCH_RULE = 'at or above the board median net $/hr (q50 = ' + dl(Q50) + '/hr), not FARM';
-  const RULE_TEXT = 'FARM = ' + FARM_RULE + '; WATCH = ' + WATCH_RULE + '; SKIP = rest';
+  const qd = (n) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const FARM_RULE = 'net $/hr >= q90 AND gas <= ' + GASCAP + ' AND p >= ' + PMIN + ' (q90 = ' + qd(Q90) + '/hr)';
+  const WATCH_RULE = 'net $/hr >= q50 and not FARM (q50 = ' + qd(Q50) + '/hr)';
+  const SKIP_RULE = 'everything else';
+  const RULE_TEXT = 'FARM: ' + FARM_RULE + '; WATCH: ' + WATCH_RULE + '; SKIP: ' + SKIP_RULE;
   const SUP = I.support_counts;
   const VRANK = { FARM: 0, WATCH: 1, SKIP: 2 };
   const COLS = [
@@ -81,18 +83,17 @@
   }
   function chip(v) {
     const c = el('span', 'vchip v-' + v.toLowerCase(), v);
-    c.title = { FARM: 'FARM = ' + FARM_RULE, WATCH: 'WATCH = ' + WATCH_RULE + ' and not FARM', SKIP: 'SKIP = rest (net $/hr under q50 = ' + dl(Q50) + '/hr)' }[v];
+    c.title = { FARM: 'FARM: ' + FARM_RULE, WATCH: 'WATCH: ' + WATCH_RULE, SKIP: 'SKIP: ' + SKIP_RULE }[v];
     return c;
   }
   // ---- legend, filled from the build's own quantiles
   (function legend() {
     const k = $('keys');
-    const key = (v, text) => { const s = el('span', 'key'); s.append(chip(v), ' ' + text); return s; };
-    k.append(
-      key('FARM', 'top decile by net $/hr within this board (q90 = ' + dl(Q90) + '/hr or more), gas ≤ ' + GASCAP + ', p ≥ ' + PMIN),
-      key('WATCH', 'at or above the board median net $/hr (q50 = ' + dl(Q50) + '/hr), not FARM'),
-      key('SKIP', 'rest'),
-    );
+        const rule = el('span', 'key rule-key');
+    [['FARM', FARM_RULE, '; '], ['WATCH', WATCH_RULE, '; '], ['SKIP', SKIP_RULE, '']].forEach(([v, t, sep]) => {
+      rule.append(chip(v), ': ' + t + sep);
+    });
+    k.append(rule);
     const w = el('span', 'key'); w.append(el('span', 'wdot'), ' watchlist');
     const n = el('span', 'key', 'ranked by implied value desc, ties by slug asc; net $/hr is a column and sets the verdict; $/hr is uncapped, wallet cap $' + P.wallet_cap_usd.toLocaleString('en-US') + '; thresholds are quantiles of this board, computed at build time');
     k.append(w, n);
@@ -118,6 +119,45 @@
     $('strip').append(d);
   });
   void ratioNote;
+
+  // ---- validation-first header: six KPI cards and the protocol accounting, all read from integrity.json's numbers
+  (function header() {
+    const K = I.kpis, A = I.accounting;
+    const card = (label, value, extra, caption, tip, cls) => {
+      const d = el('div', 'kpi' + (cls ? ' ' + cls : ''));
+      d.title = tip || caption;
+      const v = el('div', 'kv' + (value.length > 12 ? ' small' : ''));
+      if (value.length > 12) value.split(/(?<=·) /).forEach((part, i) => v.append(el('span', '', part), i ? '' : ' '));
+      else v.append(el('span', '', value));
+      if (extra) v.append(el('span', 'kn' + (extra.length > 8 ? ' wide' : ''), extra));
+      d.append(el('div', 'kk', label), v, el('div', 'kc', caption));
+      $('kpis').append(d);
+    };
+    const o = K.out_of_sample_miss, r = K.range_honesty, b = K.odds_vs_base, t = K.terms_survived, w = K.worth_farming, l = K.watchlist_ranked;
+    card('Out-of-sample miss', o.text, 'n=' + o.n, 'Median of per-peer predicted ÷ realised mcap on the newest 30% of tokenised peers by listing date (walk-forward); 1.00 is perfect.',
+      'Median of the ' + o.n + ' per-peer ratios predicted ÷ realised. The ratio of medians (median predicted ÷ median realised) is ' + num(o.ratio_of_medians, 2) + '. Trained on the oldest 70%.');
+    card('Range honesty', r.text, r.inside + ' of ' + r.n, 'Held-out tokenised peers whose realised mcap fell inside our p10–p90 band; 80% would be calibrated.',
+      r.inside + ' of ' + r.n + ' newest-30% peers landed inside p10–p90; a calibrated 80% band would catch about ' + Math.round(0.8 * r.n) + '.', r.share < 0.7 ? 'warn' : '');
+    card('Token odds vs base rate', b.text, 'n=' + b.n, 'Test Brier of the chosen model (' + b.model + ', picked on validation) ' + num(b.model_brier, 3) + ' vs base-rate Brier ' + num(b.base_brier, 3) + '. Row p(token) uses a different model, the stratified odds, whose test Brier is ' + num(b.stratified_brier, 3) + ' (base ' + num(I.brier_base_test, 3) + ').',
+      'Newest 30% of ' + I.pool_size + ' protocols, trained on the oldest 70%; lower is better. ' + I.calib_line);
+    card('Terms survived', t.text, '', 'Slopes and odds weights keeping sign and within 30% of their fitted size when refit on older and newer halves.',
+      'Value: ' + t.value.split + '. Odds: ' + t.odds.split + '. Terms: ' + t.value.terms.concat(t.odds.terms).map((x) => x.name + (x.ok ? ' ✓' : ' ✗')).join(', '), t.value.k + t.odds.k < (t.value.n + t.odds.n) / 2 ? 'warn' : '');
+    card('Worth farming', w.text, dl(w.net_usd_total) + ' net', 'Rows with verdict FARM out of scored rows; net $ is expected p50 net of gas per wallet, summed over the FARM rows.',
+      'Sum of net_usd_p50 over the ' + w.farm + ' FARM rows; expected = min(p(token) × implied × 5 bps, $12,000) − gas, an assumption-driven figure.');
+    card('Watchlist ranked', l.text, '', 'Watchlist slugs present on the board out of the watchlist size.', l.present + ' of ' + l.size + ' watchlist slugs are on the board.');
+
+    const cells = A.groups.map((g) => {
+      const c = el('div', 'cell' + (g.key === 'watchlist' || g.key === 'early' ? ' rk' : ''));
+      c.append(el('b', '', String(g.count)), el('span', '', g.label));
+      return c;
+    });
+    const sum = el('p', 'sum');
+    sum.append('Statuses are exclusive, first match wins in this order; they sum to ' + A.groups_sum + ' of ' + A.total + ' snapshot protocols ', el('span', 'ok', A.groups_sum === A.total ? '✓' : '✗'),
+      ' · rows recomputed from the snapshot: ' + A.rows_recomputed + ' of ' + A.rows);
+    const tot = el('p', 'sum');
+    tot.append(A.totals.line + ' ', el('span', 'ok', A.totals.equal ? '✓' : '✗'));
+    $('acct').append(el('h2', '', 'Protocol accounting · ' + A.total + ' protocols in the snapshot'), (() => { const g = el('div', 'cells'); g.append(...cells); return g; })(), sum, tot);
+  })();
 
   // ---- integrity view (?view=integrity): the strip in full, plus the support distribution
   function integrityView() {
@@ -221,8 +261,8 @@
       const nm = el('div', 'nm');
       if (r.watch) { const w = el('span', 'w'); w.title = 'On the watchlist'; nm.append(w); }
       nm.append(hl(r.name, q));
-      const sub = el('div', 'l2', (r.chains[0] || '–') + (r.chains.length > 1 ? ' +' + (r.chains.length - 1) : '') + ' · ' + money(r.total_cost_usd) + ' · ' + r.total_hours.toFixed(1) + ' h');
-      sub.title = 'Chains: ' + (r.chains.join(', ') || 'none') + '. Farm plan: ' + money(r.total_cost_usd) + ' total cost, ' + r.total_hours.toFixed(2) + ' hours';
+      const sub = el('div', 'l2', 'gas ' + money(r.gas_usd) + ' · cap at risk ' + money(r.capital_at_risk_usd) + ' · ' + r.total_hours.toFixed(1) + ' h');
+      sub.title = 'Gas ' + money(r.gas_usd) + ' (sum of step gas); capital at risk ' + money(r.capital_at_risk_usd) + ' (deposits, returned on exit); ' + r.total_hours.toFixed(2) + ' hours of work. Chains: ' + (r.chains.join(', ') || 'none') + '.';
       name.append(nm, sub);
       const cat = el('td', 'muted');
       cat.append(hl(r.category || '–', q));
@@ -308,16 +348,16 @@
     // bottom line
     const bl = el('div', 'bottom');
     const big = el('div', 'big');
-    big.append(el('span', 'n', money(r.net_per_hr_p50) + '/hr net'), el('span', 'l', 'at p50'), el('span', 'n2', money(r.net_per_hr_p10) + '/hr'), el('span', 'l', 'at p10'));
+    big.append(el('span', 'n', dl(r.net_per_hr_p50) + '/hr'), el('span', 'l', 'net at p50'), (() => { const g = el('span', 'p10grp'); g.append(el('span', 'n2', dl(r.net_per_hr_p10) + '/hr'), ' ', el('span', 'l', 'at p10')); return g; })());
     bl.append(big);
-    bl.append(el('p', 'bl', 'Gross ' + money(r.usd_per_hr_p50) + '/hr · gas ' + money(r.gas_usd) + ' · capital at risk ' + money(r.capital_at_risk_usd) + ' · ' + r.total_hours.toFixed(2) + ' h (' + mins(r.farm_total_minutes) + ')'));
+    bl.append(el('p', 'bl', 'Gross ' + dl(r.usd_per_hr_p50) + '/hr · gas ' + money(r.gas_usd) + ' · capital at risk ' + money(r.capital_at_risk_usd) + ' · ' + r.total_hours.toFixed(2) + ' h (' + mins(r.farm_total_minutes) + ')'));
     bl.append(el('p', 'calc', 'expected = min(p(token) × implied × capture, wallet cap); net = expected − gas; $/hr = ÷ max(hours, 0.5). No $/hr cap. Wallet cap here: $' + r.wallet_cap_usd.toLocaleString('en-US') + (r.capped ? ' (hit)' : ' (not hit; uncapped expected ' + money(r.expected_usd_raw) + ')') + '. Capture and cap are assumptions, not measurements.'));
     const vr = el('p', 'calc verdict-why');
-    vr.append(el('b', '', r.verdict + ': ' + r.verdict_reason), ' — ' + (r.verdict === 'FARM' ? 'net ' + dl(r.net_per_hr_p50) + '/hr ≥ q90 ' + dl(Q90) + ', gas ' + money(r.gas_usd) + ' ≤ ' + GASCAP + ', p ' + pc0(r.p_token) + ' ≥ ' + PMIN + '.' : r.verdict === 'WATCH' ? 'net ' + dl(r.net_per_hr_p50) + '/hr is above q50 ' + dl(Q50) + ' but not FARM. ' : 'net ' + dl(r.net_per_hr_p50) + '/hr is below q50 ' + dl(Q50) + '. ') + (r.verdict === 'FARM' ? '' : RULE_TEXT + '.'));
+    vr.append(el('b', '', r.verdict + ': ' + r.verdict_reason), ' — ' + (r.verdict === 'FARM' ? 'net ' + qd(r.net_per_hr_p50) + '/hr >= q90 ' + qd(Q90) + ', gas ' + money(r.gas_usd) + ' <= ' + GASCAP + ', p ' + pc0(r.p_token) + ' >= ' + PMIN + '.' : r.verdict === 'WATCH' ? 'net ' + qd(r.net_per_hr_p50) + '/hr is >= q50 ' + qd(Q50) + ' but not FARM. ' : 'net ' + qd(r.net_per_hr_p50) + '/hr is < q50 ' + qd(Q50) + '. ') + (r.verdict === 'FARM' ? '' : RULE_TEXT + '.'));
     bl.append(vr);
     kids.push(bl);
     kids.push(el('h3', '', 'Campaign maths' + (r.capped ? ' · wallet cap hit' : '')));
-    const c0 = (x) => money(x);
+    const c0 = (x) => '$' + (Math.abs(x) >= 10 ? Math.round(x).toLocaleString('en-US') : x.toFixed(2));
     kids.push(table('camp', [['Term'], ['p50', 'num'], ['p10', 'num']], [
       ['p(token)', pc0(r.p_token), pc0(r.p_token)],
       ['Implied value', usd(r.implied_value_usd), usd(r.implied_p10_usd)],
@@ -428,5 +468,5 @@
     if (h) $('detail').scrollTop = h.offsetTop - $('detail').offsetTop - 6;
   }
   const sel = document.querySelector('#rows tr.sel');
-  if (sel) sel.scrollIntoView({ block: 'center' });
+  if (sel && state.row) { const sc = sel.closest('.table-scroll'); sc.scrollTop = Math.max(0, sel.offsetTop - sc.clientHeight / 2); }
 })();

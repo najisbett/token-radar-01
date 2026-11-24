@@ -241,6 +241,12 @@ export interface Integrity {
   q90_net_per_hr: number;
   as_of: string;
   method: string;
+  wf_median_ratio: number;
+  wf_ratio_of_medians: number;
+  wf_inside: number;
+  wf_n: number;
+  kpis: Kpis;
+  accounting: Accounting;
 }
 
 export interface RadarData {
@@ -426,13 +432,13 @@ function design(m: { name: CalibName; cats: string[]; mean?: number[]; sd?: numb
 }
 
 /** Ridge-regularised logistic regression by batch gradient descent on standardised columns. name 'base-rate' fits the intercept only. */
-export function fitLogit(rows: LRow[], name: CalibName): Logit {
+export function fitLogit(rows: LRow[], name: CalibName, forceCats?: string[]): Logit {
   const n = rows.length;
   const base = rows.reduce((s, r) => s + r.y, 0) / n;
   const b0 = Math.log(Math.max(base, 1e-3) / Math.max(1 - base, 1e-3));
   const counts = new Map<string, number>();
   for (const r of rows) counts.set(r.cat, (counts.get(r.cat) ?? 0) + 1);
-  const cats = name === 'rich' ? [...counts].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, TOP_CATS).map((e) => e[0]) : [];
+  const cats = name === 'rich' && forceCats !== undefined ? forceCats : name === 'rich' ? [...counts].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, TOP_CATS).map((e) => e[0]) : [];
   const feats = name === 'rich'
     ? ['log TVL', 'age years', 'change 7d', 'log TVL x age', ...cats.map((k) => `cat:${k}`), 'cat:other (reference)']
     : name === 'plain-3' ? ['log TVL', 'age years', 'change 7d'] : [];
@@ -628,6 +634,8 @@ export function validate(snapshot: Snapshot): Integrity {
   const test = dated.slice(cut);
   const preds = test.map((q) => predict(tr, q));
   const wf = median(preds.map((v) => v.implied)) / median(test.map((q) => q.mcap));
+  const wfMedian = median(test.map((q, i) => preds[i]!.implied / q.mcap));
+  const insideN = test.filter((q, i) => q.mcap >= preds[i]!.p10 && q.mcap <= preds[i]!.p90).length;
   const inside = test.filter((q, i) => q.mcap >= preds[i]!.p10 && q.mcap <= preds[i]!.p90).length / test.length;
 
   // (b) leave-one-out on the coefficient fit (medians and coefficients refit without the held-out peer)
@@ -711,6 +719,12 @@ export function validate(snapshot: Snapshot): Integrity {
     q50_net_per_hr: 0,
     q90_net_per_hr: 0,
     as_of: asOf,
+    wf_median_ratio: r4(wfMedian),
+    wf_ratio_of_medians: r4(wf),
+    wf_inside: insideN,
+    wf_n: test.length,
+    kpis: null as unknown as Kpis,
+    accounting: null as unknown as Accounting,
     method:
       'walk-forward: oldest 70% of tokenised peers by listed_at train, newest 30% test, ratio = median predicted / median realised mcap; ' +
       'leave-one-out: medians and growth/age coefficients refit without each peer, same ratio over all peers; ' +
@@ -1086,6 +1100,8 @@ export function buildRadar(snapshot: Snapshot): { board: Row[]; radar: RadarData
     integrity.support_counts[r.support_level]++;
   }
   integrity.verdict_violations = verdictAudit(board).length;
+  integrity.accounting = accountingOf(snapshot, board);
+  integrity.kpis = kpisOf(snapshot, board, integrity);
 
   const keys = new Set(board.map((r) => r.value.peer_key));
   const peerSets: RadarData['peer_sets'] = {};
@@ -1217,4 +1233,141 @@ export function topTenTies(board: Row[], key: 'net_per_hr_p50' | 'usd_per_hr_p50
 
 export function dataScript(radar: RadarData): string {
   return `window.RADAR=${JSON.stringify(radar)};\n`;
+}
+
+// ---------------------------------------------------------------- header KPIs and protocol accounting
+
+export interface Term { name: string; full: number | null; half1: number | null; half2: number | null; ok: boolean }
+export interface Stability { k: number; n: number; terms: Term[]; split: string }
+export interface Kpis {
+  out_of_sample_miss: { ratio: number; ratio_of_medians: number; n: number; text: string };
+  range_honesty: { inside: number; n: number; share: number; text: string };
+  odds_vs_base: { model: string; model_brier: number; base_brier: number; n: number; stratified_brier: number; text: string };
+  terms_survived: { value: Stability; odds: Stability; text: string };
+  worth_farming: { farm: number; scored: number; net_usd_total: number; text: string };
+  watchlist_ranked: { present: number; size: number; text: string };
+}
+export interface Accounting {
+  total: number;
+  groups: { key: string; label: string; count: number }[];
+  groups_sum: number;
+  rows_recomputed: number;
+  rows: number;
+  totals: { board_usd: number; rows_usd: number; recomputed_usd: number; equal: boolean; line: string };
+}
+
+const SURVIVE_TOL = 0.3;
+const survives = (full: number | null, h: number | null): boolean =>
+  full !== null && h !== null && Math.sign(h) === Math.sign(full) && full !== 0 && Math.abs(h - full) <= SURVIVE_TOL * Math.abs(full);
+const byListed = <T extends { listed: string | null; slug: string }>(xs: T[]): T[] =>
+  xs.filter((x) => x.listed !== null).sort((a, b) => (a.listed! < b.listed! ? -1 : a.listed! > b.listed! ? 1 : a.slug < b.slug ? -1 : 1));
+
+/**
+ * Coefficients that keep their sign and stay within 30% of the fitted magnitude when refit on the older and the newer
+ * half (by listed_at) of the dated set. Value terms: the growth and age slopes (the category medians are group medians, not
+ * coefficients, and most categories have under min_peers peers in a half, so they are not counted).
+ * Odds terms: the validation-chosen logistic model's standardised weights, refit with the same category indicators.
+ */
+export function stabilityOf(snapshot: Snapshot, chosen: CalibName): { value: Stability; odds: Stability } {
+  const peers = peersOf(snapshot);
+  const prod = train(peers);
+  const dated = byListed(peers);
+  const mid = Math.floor(dated.length / 2);
+  const halves = [train(dated.slice(0, mid)), train(dated.slice(mid))];
+  const vt: Term[] = [];
+  const mk = (name: string, full: number | null, a: number | null, b: number | null): Term => ({ name, full, half1: a, half2: b, ok: survives(full, a) && survives(full, b) });
+  vt.push(mk('growth slope', prod.fit.b_growth, halves[0]!.fit.b_growth, halves[1]!.fit.b_growth));
+  vt.push(mk('age slope', prod.fit.b_age, halves[0]!.fit.b_age, halves[1]!.fit.b_age));
+  const pool = byListed(poolOf(snapshot));
+  const pmid = Math.floor(pool.length / 2);
+  const full = fitLogit(pool.map((e) => e.l), chosen);
+  const f1 = fitLogit(pool.slice(0, pmid).map((e) => e.l), chosen, full.cats);
+  const f2 = fitLogit(pool.slice(pmid).map((e) => e.l), chosen, full.cats);
+  const ot: Term[] = full.w.map((w, j) => mk(full.features[j]!, w, f1.w[j] ?? null, f2.w[j] ?? null));
+  const sv = (t: Term[], split: string): Stability => ({ k: t.filter((x) => x.ok).length, n: t.length, terms: t, split });
+  return {
+    value: sv(vt, `older/newer half of ${dated.length} dated tokenised peers (${mid} + ${dated.length - mid})`),
+    odds: sv(ot, `older/newer half of ${pool.length} dated protocols (${pmid} + ${pool.length - pmid}), tokenised or not`),
+  };
+}
+
+const NAME_WRAPPED = (n: string): boolean => /\b(wrapped|staked)\b/i.test(n) || /^(w|st|wst)[A-Z0-9]{2,}\b/.test(n) || /^WBTC\b/.test(n);
+
+/** Mutually exclusive status of every snapshot protocol; first match wins, in this order. */
+export const STATUS_ORDER: [string, string][] = [
+  ['watchlist', 'ranked watchlist'],
+  ['early', 'ranked early, below the floor'],
+  ['token', 'already records a token'],
+  ['lst', 'liquid staking'],
+  ['cex', 'exchange custody'],
+  ['wrapped', 'wrapped or staked'],
+  ['versioned', 'versioned release'],
+  ['other', 'other'],
+];
+
+export function statusOf(p: SnapshotProtocol, ranked: Map<string, boolean>): string {
+  const r = ranked.get(p.slug);
+  if (r !== undefined) return r ? 'watchlist' : 'early';
+  if (!isPreToken(p)) return 'token';
+  if (p.category === 'Liquid Staking') return 'lst';
+  if (p.category === 'CEX') return 'cex';
+  if (NAME_WRAPPED(p.name)) return 'wrapped';
+  if (VERSIONED.test(p.name)) return 'versioned';
+  return 'other';
+}
+
+/** Recomputes every row's implied value from the snapshot alone and totals it three ways; throws if they disagree. */
+export function accountingOf(snapshot: Snapshot, board: Row[]): Accounting {
+  const trained = train(peersOf(snapshot));
+  const index = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  let recomputed = 0, recomputedUsd = 0;
+  for (const r of board) {
+    const p = index.get(r.slug)!;
+    const v = valueOf(trained, catKey(p.category), p.tvl_usd, p.change_7d, ageDays(snapshot.as_of, p.listed_at));
+    recomputedUsd += v.implied;
+    if (v.implied === r.implied_value_usd && v.p10 === r.implied_p10_usd && v.p90 === r.implied_p90_usd) recomputed++;
+  }
+  const ranked = new Map(board.map((r) => [r.slug, r.watch] as const));
+  const counts = new Map(STATUS_ORDER.map(([k]) => [k, 0]));
+  for (const p of snapshot.protocols) counts.set(statusOf(p, ranked), counts.get(statusOf(p, ranked))! + 1);
+  const groups = STATUS_ORDER.map(([key, label]) => ({ key, label, count: counts.get(key)! }));
+  const groupsSum = groups.reduce((s, g) => s + g.count, 0);
+  if (groupsSum !== snapshot.protocols.length) throw new Error(`accounting: groups sum to ${groupsSum}, snapshot has ${snapshot.protocols.length}`);
+  const boardUsd = board.filter((r) => r.watch).reduce((s, r) => s + r.implied_value_usd, 0) + board.filter((r) => !r.watch).reduce((s, r) => s + r.implied_value_usd, 0);
+  const rowsUsd = board.reduce((s, r) => s + r.implied_value_usd, 0);
+  const equal = boardUsd === rowsUsd && rowsUsd === recomputedUsd;
+  if (!equal) throw new Error(`accounting: totals disagree: watchlist+early ${boardUsd}, rows ${rowsUsd}, recomputed ${recomputedUsd}`);
+  if (recomputed !== board.length) throw new Error(`accounting: only ${recomputed} of ${board.length} rows recompute`);
+  const money0 = (n: number): string => '$' + n.toLocaleString('en-US');
+  return {
+    total: snapshot.protocols.length,
+    groups,
+    groups_sum: groupsSum,
+    rows_recomputed: recomputed,
+    rows: board.length,
+    totals: {
+      board_usd: boardUsd,
+      rows_usd: rowsUsd,
+      recomputed_usd: recomputedUsd,
+      equal,
+      line: `Implied value across the board ${money0(boardUsd)} = sum over ${board.length} rows ${money0(rowsUsd)} = sum recomputed from the snapshot ${money0(recomputedUsd)}: equal`,
+    },
+  };
+}
+
+export function kpisOf(snapshot: Snapshot, board: Row[], i: Integrity): Kpis {
+  const st = stabilityOf(snapshot, i.calib_model);
+  const slugs = new Set(board.map((r) => r.slug));
+  const present = snapshot.watchlist.filter((s) => slugs.has(s)).length;
+  const farm = board.filter((r) => r.verdict === 'FARM');
+  const net = r2(farm.reduce((s, r) => s + r.net_usd_p50, 0));
+  const share = i.wf_inside / i.wf_n;
+  return {
+    out_of_sample_miss: { ratio: i.wf_median_ratio, ratio_of_medians: i.wf_ratio_of_medians, n: i.wf_n, text: `x${i.wf_median_ratio.toFixed(2)}` },
+    range_honesty: { inside: i.wf_inside, n: i.wf_n, share: r4(share), text: `${Math.round(share * 100)}%` },
+    odds_vs_base: { model: i.calib_model, model_brier: i.calib_test_brier, base_brier: i.calib_base_test, n: i.calib_n, stratified_brier: i.brier_stratified_test, text: `${i.calib_test_brier.toFixed(3)} vs ${i.calib_base_test.toFixed(3)}` },
+    terms_survived: { value: st.value, odds: st.odds, text: `${st.value.k} of ${st.value.n} value · ${st.odds.k} of ${st.odds.n} odds` },
+    worth_farming: { farm: farm.length, scored: board.length, net_usd_total: net, text: `${farm.length} of ${board.length}` },
+    watchlist_ranked: { present, size: snapshot.watchlist.length, text: `${present}/${snapshot.watchlist.length}` },
+  };
 }

@@ -58,5 +58,198 @@
  "q50_net_per_hr": 646.77,
  "q90_net_per_hr": 3706.61,
  "as_of": "2026-11-14",
+ "wf_median_ratio": 0.9338,
+ "wf_ratio_of_medians": 0.9726,
+ "wf_inside": 17,
+ "wf_n": 27,
+ "kpis": {
+  "out_of_sample_miss": {
+   "ratio": 0.9338,
+   "ratio_of_medians": 0.9726,
+   "n": 27,
+   "text": "x0.93"
+  },
+  "range_honesty": {
+   "inside": 17,
+   "n": 27,
+   "share": 0.6296,
+   "text": "63%"
+  },
+  "odds_vs_base": {
+   "model": "rich",
+   "model_brier": 0.0617,
+   "base_brier": 0.0754,
+   "n": 179,
+   "stratified_brier": 0.0765,
+   "text": "0.062 vs 0.075"
+  },
+  "terms_survived": {
+   "value": {
+    "k": 0,
+    "n": 2,
+    "terms": [
+     {
+      "name": "growth slope",
+      "full": -3.2967700216481943,
+      "half1": 5.602970808802088,
+      "half2": -5.3519581836664685,
+      "ok": false
+     },
+     {
+      "name": "age slope",
+      "full": -0.015246469122787794,
+      "half1": 2.530808486690704,
+      "half2": -0.6466132886003969,
+      "ok": false
+     }
+    ],
+    "split": "older/newer half of 87 dated tokenised peers (43 + 44)"
+   },
+   "odds": {
+    "k": 3,
+    "n": 10,
+    "terms": [
+     {
+      "name": "log TVL",
+      "full": 0.012330748085866,
+      "half1": -0.16941220677612873,
+      "half2": 0.3011122785602559,
+      "ok": false
+     },
+     {
+      "name": "age years",
+      "full": 0.5291701391088761,
+      "half1": 0.5317334748428798,
+      "half2": 0.45214366417477636,
+      "ok": true
+     },
+     {
+      "name": "change 7d",
+      "full": -0.3486436069518671,
+      "half1": -0.10853844897423962,
+      "half2": -0.9902837756433427,
+      "ok": false
+     },
+     {
+      "name": "log TVL x age",
+      "full": -0.1686279691377814,
+      "half1": 0.033219531177231004,
+      "half2": -0.4186852778525767,
+      "ok": false
+     },
+     {
+      "name": "cat:Dexs",
+      "full": -0.32479994006226276,
+      "half1": -0.30944960187493464,
+      "half2": -0.418265877065804,
+      "ok": true
+     },
+     {
+      "name": "cat:Liquid Staking",
+      "full": -0.2845746795109485,
+      "half1": -0.3089429497943727,
+      "half2": -0.32134432809251284,
+      "ok": true
+     },
+     {
+      "name": "cat:Lending",
+      "full": -0.08355992044288453,
+      "half1": -0.08393840858238165,
+      "half2": -0.1389478489177886,
+      "ok": false
+     },
+     {
+      "name": "cat:Bridge",
+      "full": -0.22420143519192526,
+      "half1": -0.13972109055828788,
+      "half2": -0.5036818696007888,
+      "ok": false
+     },
+     {
+      "name": "cat:Risk Curators",
+      "full": -0.31037068511289045,
+      "half1": 0.202910005785582,
+      "half2": -0.6789336884819527,
+      "ok": false
+     },
+     {
+      "name": "cat:RWA",
+      "full": 0.15463115263963415,
+      "half1": -0.028072523849941966,
+      "half2": 0.36650820676846924,
+      "ok": false
+     }
+    ],
+    "split": "older/newer half of 595 dated protocols (297 + 298), tokenised or not"
+   },
+   "text": "0 of 2 value · 3 of 10 odds"
+  },
+  "worth_farming": {
+   "farm": 14,
+   "scored": 200,
+   "net_usd_total": 117238.9,
+   "text": "14 of 200"
+  },
+  "watchlist_ranked": {
+   "present": 40,
+   "size": 40,
+   "text": "40/40"
+  }
+ },
+ "accounting": {
+  "total": 758,
+  "groups": [
+   {
+    "key": "watchlist",
+    "label": "ranked watchlist",
+    "count": 40
+   },
+   {
+    "key": "early",
+    "label": "ranked early, below the floor",
+    "count": 160
+   },
+   {
+    "key": "token",
+    "label": "already records a token",
+    "count": 416
+   },
+   {
+    "key": "lst",
+    "label": "liquid staking",
+    "count": 23
+   },
+   {
+    "key": "cex",
+    "label": "exchange custody",
+    "count": 42
+   },
+   {
+    "key": "wrapped",
+    "label": "wrapped or staked",
+    "count": 1
+   },
+   {
+    "key": "versioned",
+    "label": "versioned release",
+    "count": 11
+   },
+   {
+    "key": "other",
+    "label": "other",
+    "count": 65
+   }
+  ],
+  "groups_sum": 758,
+  "rows_recomputed": 200,
+  "rows": 200,
+  "totals": {
+   "board_usd": 5063599108,
+   "rows_usd": 5063599108,
+   "recomputed_usd": 5063599108,
+   "equal": true,
+   "line": "Implied value across the board $5,063,599,108 = sum over 200 rows $5,063,599,108 = sum recomputed from the snapshot $5,063,599,108: equal"
+  }
+ },
  "method": "walk-forward: oldest 70% of tokenised peers by listed_at train, newest 30% test, ratio = median predicted / median realised mcap; leave-one-out: medians and growth/age coefficients refit without each peer, same ratio over all peers; brier (brier_model, brier_base): leave-one-out stratified odds vs tokenised label over every non-CEX protocol, base = leave-one-out global rate; brier_*_test: three candidates (base rate; plain logistic on log TVL, age years, 7d change; rich logistic adding log TVL x age and top-six category indicators, all standardised) trained on oldest 70% of the pool by listed_at; the winner is chosen on a validation slice (newest 30% of that training block) and its test Brier on the newest 30% is reported against the train base rate; row odds use the support-pooled stratified rate (>= 8 tokenised peers, finest -> category -> global); the logistic candidates are calibration checks only"
 }
