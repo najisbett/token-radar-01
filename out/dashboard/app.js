@@ -31,8 +31,8 @@
   const dl = (n) => '$' + Math.round(n).toLocaleString('en-US');
   const Q90 = I.q90_net_per_hr, Q50 = I.q50_net_per_hr;
   const GASCAP = '$' + P.farm_max_gas_usd, PMIN = Math.round(P.farm_min_p * 100) + '%';
-  const FARM_RULE = 'top decile by net $/hr, gas ≤ ' + GASCAP + ', p ≥ ' + PMIN + ' (q90 = ' + dl(Q90) + '/hr)';
-  const WATCH_RULE = 'above median (q50 = ' + dl(Q50) + '/hr)';
+  const FARM_RULE = 'top decile by net $/hr within this board (q90 = ' + dl(Q90) + '/hr or more), gas ≤ ' + GASCAP + ', p ≥ ' + PMIN;
+  const WATCH_RULE = 'at or above the board median net $/hr (q50 = ' + dl(Q50) + '/hr), not FARM';
   const RULE_TEXT = 'FARM = ' + FARM_RULE + '; WATCH = ' + WATCH_RULE + '; SKIP = rest';
   const SUP = I.support_counts;
   const VRANK = { FARM: 0, WATCH: 1, SKIP: 2 };
@@ -89,12 +89,12 @@
     const k = $('keys');
     const key = (v, text) => { const s = el('span', 'key'); s.append(chip(v), ' ' + text); return s; };
     k.append(
-      key('FARM', 'top decile by net $/hr, gas ≤ ' + GASCAP + ', p ≥ ' + PMIN + ' (q90 = ' + dl(Q90) + '/hr)'),
-      key('WATCH', 'above median (q50 = ' + dl(Q50) + '/hr)'),
+      key('FARM', 'top decile by net $/hr within this board (q90 = ' + dl(Q90) + '/hr or more), gas ≤ ' + GASCAP + ', p ≥ ' + PMIN),
+      key('WATCH', 'at or above the board median net $/hr (q50 = ' + dl(Q50) + '/hr), not FARM'),
       key('SKIP', 'rest'),
     );
     const w = el('span', 'key'); w.append(el('span', 'wdot'), ' watchlist');
-    const n = el('span', 'key', 'sorted by net $/hr p50 desc, then p10 desc, gas asc, slug asc (strict order); $/hr is uncapped, wallet cap $' + P.wallet_cap_usd.toLocaleString('en-US') + '; thresholds are quantiles of this board, computed at build time');
+    const n = el('span', 'key', 'ranked by implied value desc, ties by slug asc; net $/hr is a column and sets the verdict; $/hr is uncapped, wallet cap $' + P.wallet_cap_usd.toLocaleString('en-US') + '; thresholds are quantiles of this board, computed at build time');
     k.append(w, n);
   })();
 
@@ -103,7 +103,7 @@
   $('meta').textContent = 'Snapshot ' + D.as_of + ' · ' + watchN + ' on watchlist + ' + D.early_size + ' early finds below ' + usd(D.floor_usd) + ' TVL · ' + D.live_size + ' live-token protocols excluded · model ' + D.model_version;
   const ratioNote = (x) => (x >= 0.8 && x <= 1.25 ? 'within ±25% of 1.00' : 'off the 1.00 ideal');
   [
-    ['Protocols scored', String(I.protocols_scored), 'ranked by net $/hr, ' + D.watchlist_size + ' on the watchlist', 'Rows on this board'],
+    ['Protocols scored', String(I.protocols_scored), 'ranked by implied value, ' + D.watchlist_size + ' on the watchlist', 'Rows on this board'],
     ['Peers used', String(I.peers_used), 'tokenised peers (mcap known)', 'Tokenised, non-CEX protocols behind implied values and the fit; the odds pool is ' + I.pool_size],
     ['Walk-forward', num(I.walk_forward_ratio, 2), 'out-of-sample, ' + I.walk_forward_test + ' newest peers', 'Median predicted ÷ median realised value on the newest 30% by listing date; 1.00 is ideal. p10–p90 covered ' + pc0(I.walk_forward_p10_p90_coverage) + ' of them (80% ideal)'],
     ['Leave-one-out', num(I.leave_one_out_ratio, 2), 'refit without each peer', 'Median predicted ÷ median realised value, each peer predicted from a fit that excluded it; 1.00 is ideal'],
@@ -215,7 +215,7 @@
       tr.tabIndex = 0;
       tr.dataset.slug = r.slug;
       const rk = el('td', 'num muted', String(r.rank));
-      rk.title = 'Rank ' + r.rank + ' by net $/hr at p50';
+      rk.title = 'Rank ' + r.rank + ' by implied value at p50';
       const name = el('td', 'name');
       name.title = r.name + ' — ' + r.why;
       const nm = el('div', 'nm');
@@ -303,7 +303,7 @@
     hd.append(el('h2', '', r.name), chip(r.verdict));
     if (r.watch) hd.append(el('span', 'badge', 'watchlist'));
     kids.push(hd);
-    kids.push(el('p', 'sub', (r.category || 'Uncategorised') + ' · ' + (r.chains.slice(0, 3).join(', ') || 'no chain') + ' · rank ' + r.rank + ' of ' + D.rows.length + ' by net $/hr'));
+    kids.push(el('p', 'sub', (r.category || 'Uncategorised') + ' · ' + (r.chains.slice(0, 3).join(', ') || 'no chain') + ' · rank ' + r.rank + ' of ' + D.rows.length + ' by implied value'));
 
     // bottom line
     const bl = el('div', 'bottom');

@@ -993,8 +993,8 @@ export function buildRadar(snapshot: Snapshot): { board: Row[]; radar: RadarData
     const netHr10 = net10 / h;
     return { p, age, odds, v, steps, cost, minutes, hours, expRaw, exp50, exp10, gas, bridge, deposits, hr50, hr10, net50, net10, netHr50, netHr10 };
   });
-  // strict total order on the printed (2-decimal) figures: net $/hr p50 desc, p10 desc, gas asc, slug asc
-  scored.sort((a, b) => r2(b.netHr50) - r2(a.netHr50) || r2(b.netHr10) - r2(a.netHr10) || r2(a.gas) - r2(b.gas) || bySlug(a.p, b.p));
+  // strict total order: implied value desc, slug asc (net $/hr stays a column and drives the verdict quantiles only)
+  scored.sort((a, b) => b.v.implied - a.v.implied || bySlug(a.p, b.p));
 
   const th = thresholdsOf(scored.map((x) => r2(x.netHr50)));
   integrity.q50_net_per_hr = th.q50;
@@ -1181,7 +1181,10 @@ export function boardIssue(board: Row[], snapshot: Snapshot): string | null {
   if (missing.length > 0) return `the board misses ${missing.length} watchlist slug(s): ${missing.slice(0, 5).join(', ')}`;
   if (board.length < 150 || board.length > 260) return `${board.length} rows, want 150-260`;
   for (let i = 0; i < board.length; i++) if (board[i]!.rank !== i + 1) return `rank ${i + 1} is ${board[i]!.rank}`;
-  for (let i = 1; i < board.length; i++) if (board[i]!.net_per_hr_p50 > board[i - 1]!.net_per_hr_p50) return `row ${i + 1} outranks row ${i} on net $/hr`;
+  for (let i = 1; i < board.length; i++) {
+    const a = board[i - 1]!, b = board[i]!;
+    if (b.implied_value_usd > a.implied_value_usd || (b.implied_value_usd === a.implied_value_usd && b.slug < a.slug)) return `row ${i + 1} outranks row ${i} on implied value`;
+  }
   const violations = verdictAudit(board);
   if (violations.length > 0) return `verdict rule violations: ${violations.slice(0, 3).join(' | ')}`;
   const seen = new Map<string, string>();

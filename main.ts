@@ -92,13 +92,13 @@ out(`check verdicts: ${JSON.stringify(radar.integrity.verdict_counts)}; rule vio
 out(`check support level used across ${board.length} rows: ${JSON.stringify(radar.integrity.support_counts)}`);
 out(`check ${dist('gross $/hr p50', board.map((r) => r.usd_per_hr_p50))}`);
 out(`check ${dist('net $/hr p50  ', board.map((r) => r.net_per_hr_p50))}`);
-out(`check net $/hr never rises: ${board.every((r, i) => i === 0 || r.net_per_hr_p50 <= board[i - 1]!.net_per_hr_p50)}`);
+out(`check implied value never rises: ${board.every((r, i) => i === 0 || r.implied_value_usd <= board[i - 1]!.implied_value_usd)}`);
 for (const key of ['net_per_hr_p50', 'usd_per_hr_p50'] as const) {
   const ties = topTenTies(board, key);
   out(`check top-ten distinct on ${key}: ${ties.length === 0 ? 'yes' : 'NO, ties ' + JSON.stringify(ties)}`);
 }
-out('top five by net $/hr:');
-for (const r of board.slice(0, 5)) out(`  ${r.rank} ${r.slug} | gross ${r.usd_per_hr_p50}/hr | gas $${r.gas_usd} | net ${r.net_per_hr_p50}/hr | p_token ${r.p_token} | ${r.verdict} (${r.verdict_reason}) | ${r.support_text}`);
+out('top five by implied value:');
+for (const r of board.slice(0, 5)) out(`  ${r.rank} ${r.slug} | implied ${r.implied_value_usd} | gross ${r.usd_per_hr_p50}/hr | gas $${r.gas_usd} | net ${r.net_per_hr_p50}/hr | p_token ${r.p_token} | ${r.verdict} (${r.verdict_reason}) | ${r.support_text}`);
 if (violations.length > 0) die(1, 'verdict rule violations');
 
 const summary = `${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on watchlist, ${board.length} rows (${radar.early_size} early, ${radar.live_size} live aside); walk-forward ${radar.integrity.walk_forward_ratio}, leave-one-out ${radar.integrity.leave_one_out_ratio}, Brier test (stratified) ${radar.integrity.brier_stratified_test} vs base ${radar.integrity.brier_base_test} (n=${radar.integrity.brier_test_n}, odds ${radar.integrity.odds_model}); verdicts ${JSON.stringify(radar.integrity.verdict_counts)}`;
