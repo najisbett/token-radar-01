@@ -1,0 +1,62 @@
+{
+ "protocols_scored": 200,
+ "peers_used": 119,
+ "pool_size": 702,
+ "walk_forward_ratio": 0.9726,
+ "leave_one_out_ratio": 1.1355,
+ "brier_model": 0.143,
+ "brier_base": 0.1412,
+ "walk_forward_train": 60,
+ "walk_forward_test": 27,
+ "walk_forward_p10_p90_coverage": 0.6296,
+ "brier_n": 702,
+ "brier_base_rate": 0.1695,
+ "brier_model_test": 0.0629,
+ "brier_base_test": 0.0754,
+ "brier_stratified_test": 0.0765,
+ "brier_test_n": 179,
+ "odds_model": "stratified",
+ "brier_plain_test": 0.0629,
+ "brier_rich_test": 0.0617,
+ "calib_model": "rich",
+ "calib_val_brier": 0.1238,
+ "calib_val_n": 125,
+ "calib_val_briers": {
+  "base-rate": 0.126,
+  "plain-3": 0.1264,
+  "rich": 0.1238
+ },
+ "calib_test_brier": 0.0617,
+ "calib_base_test": 0.0754,
+ "calib_n": 179,
+ "calib_features": [
+  "log TVL",
+  "age years",
+  "change 7d",
+  "log TVL x age",
+  "cat:Liquid Staking",
+  "cat:Dexs",
+  "cat:Lending",
+  "cat:Bridge",
+  "cat:RWA",
+  "cat:Onchain Capital Allocator",
+  "cat:other (reference)"
+ ],
+ "calib_line": "calibration: rich; validation Brier 0.1238 (n=125); test Brier 0.0617 vs base rate 0.0754 (n=179); features: log TVL, age years, change 7d, log TVL x age, cat:Liquid Staking, cat:Dexs, cat:Lending, cat:Bridge, cat:RWA, cat:Onchain Capital Allocator, cat:other (reference)",
+ "logistic_beats_base": true,
+ "verdict_counts": {
+  "FARM": 14,
+  "WATCH": 86,
+  "SKIP": 100
+ },
+ "support_counts": {
+  "finest": 0,
+  "category": 79,
+  "global": 121
+ },
+ "verdict_violations": 0,
+ "q50_net_per_hr": 646.77,
+ "q90_net_per_hr": 3706.61,
+ "as_of": "2026-11-14",
+ "method": "walk-forward: oldest 70% of tokenised peers by listed_at train, newest 30% test, ratio = median predicted / median realised mcap; leave-one-out: medians and growth/age coefficients refit without each peer, same ratio over all peers; brier (brier_model, brier_base): leave-one-out stratified odds vs tokenised label over every non-CEX protocol, base = leave-one-out global rate; brier_*_test: three candidates (base rate; plain logistic on log TVL, age years, 7d change; rich logistic adding log TVL x age and top-six category indicators, all standardised) trained on oldest 70% of the pool by listed_at; the winner is chosen on a validation slice (newest 30% of that training block) and its test Brier on the newest 30% is reported against the train base rate; row odds use the support-pooled stratified rate (>= 8 tokenised peers, finest -> category -> global); the logistic candidates are calibration checks only"
+}

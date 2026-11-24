@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar · pre-token protocols by implied value</title>
+<title>Token Radar · pre-token protocols by net $/hour</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -11,22 +11,26 @@
   <div class="brand"><span class="dot" aria-hidden="true"></span><h1>Token Radar</h1></div>
   <p id="meta" class="meta"></p>
 </header>
+<p class="assume" id="assume">expected = min(p(token) x implied value x 5 bps, $12,000 per wallet); net = expected - gas; net $/hr = net / max(hours, 0.5), no $/hr cap; deposits are capital at risk, not subtracted</p>
 
-<section class="strip" id="strip" aria-label="Summary of the rows shown"></section>
+<section class="strip" id="strip" aria-label="Integrity strip: model validation"></section>
 
-<section class="legend" aria-label="How implied value is computed">
-  <code class="formula">implied value = TVL × <b class="c-cat" title="What the market pays for the business">category</b> × <b class="c-gro" title="7-day change, compounded to 90 days and damped">growth</b> × <b class="c-age" title="Time listed with no token">age</b> × <b class="c-thin" title="Discount when TVL is under $5M">thin</b></code>
-  <p class="keys"><span class="key"><i class="kbar"><i></i></i> bar = value / TVL</span><span class="key"><span class="warn">⚠</span> thin TVL</span><span class="key">±8% default band; <span class="chip conf">±15%</span> under $5M TVL</span><span class="key"><span class="wdot"></span> watchlist</span><span class="key">readiness (dim rows &lt;40) <i class="rmini lo"><i></i></i>&lt;40 <i class="rmini mid"><i></i></i>40–70 <i class="rmini hi"><i></i></i>&gt;70</span><span class="key"><span class="sig sig-dig">DIG</span> ≥70 &amp; ≥1.1× <span class="sig sig-watch">WATCH</span> ≥50 <span class="sig sig-pass">PASS</span></span></p>
+<section class="legend" aria-label="How the board is computed">
+  <code class="formula">net $/hr = (min(<b class="c-gro" title="Peer-based token odds">p(token)</b> × <b class="c-cat" title="TVL × category median mcap/TVL × growth × age, clipped 0.3–3.0× TVL">implied value</b> × <b class="c-age" title="Assumed share of the implied value a farmer captures: 5 basis points">5 bps capture</b>, $12,000 per wallet) − gas) ÷ <b class="c-thin" title="Sum of the step minutes, floor 0.5 h">hours</b></code>
+  <p class="keys" id="keys"></p>
 </section>
 
 <form class="filters" role="search" onsubmit="return false">
   <label class="grow">Search<input id="q" type="search" autocomplete="off" placeholder="Protocol, category or chain"></label>
   <label>Category<select id="category"><option value="">All categories</option></select></label>
   <label>Chain<select id="chain"><option value="">All chains</option></select></label>
+  <label>Verdict<select id="verdict"><option value="">All verdicts</option><option>FARM</option><option>WATCH</option><option>SKIP</option></select></label>
   <label class="check"><input id="watch" type="checkbox"> Watchlist only</label>
   <button id="reset" type="button">Reset</button>
   <p id="count" class="count" aria-live="polite"></p>
 </form>
+
+<section id="integrity-view" class="iview" hidden></section>
 
 <main class="layout">
   <div class="table-scroll">
